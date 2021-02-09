@@ -1,0 +1,95 @@
+$BBIHomepath = "C:\Users\leninkamalla\Desktop\Scripts\P1DomainJoin"
+
+## Start the logging transcript
+$ErrorActionPreference = "SilentlyContinue";
+Stop-Transcript | Out-Null;
+$ErrorActionPreference = "Continue";
+$bbiTimestamp  = Get-Date -Format yyMMddHHmm;
+$bbiOut2Log = "$bbiHomePath\result-$bbiTimestamp.log";
+Start-Transcript -Path "$bbiOut2Log";
+
+Set-Location $bbiHomePath;
+
+$Hostlistfile = "$BBIHomepath\DeviceList.txt"
+
+#Get Host list and POSNames from text file
+if (test-path "$Hostlistfile") {
+    $ListofHosts = Get-Content "$Hostlistfile"
+    } else {
+    Write-host "There is no hosts list file available please add hosts list file."
+    continue
+}
+
+$myP1UsePwd = '**********************************';
+$myP1Usr  = ".\support";
+$secStr = ConvertTo-SecureString $myP1UsePwd -AsPlainText -Force
+$promptCreds = New-Object System.Management.Automation.PSCredential($myP1Usr,$secStr);
+
+
+$myP1UsePwds = "************"
+$myP1Usrs = "osirs.local\lkamaosirs";
+$secStrs = ConvertTo-SecureString $myP1UsePwds -AsPlainText -Force
+$promptCredslab = New-Object System.Management.Automation.PSCredential($myP1Usrs,$secStrs);
+
+
+foreach ($singlehost in $ListofHosts) {
+if (Test-Connection -ComputerName $singlehost -BufferSize 16 -Count 1 -ea 0 -quiet) {
+#################################### Join the Domain #############################################
+Invoke-Command -ComputerName $singlehost -Credential $promptCreds -ScriptBlock  {param($singlehost,$promptCreds,$promptCredslab)
+    $errorActionPreference="Continue"
+    $singlehost = $env:COMPUTERNAME
+    if ($singlehost.Substring(0,3).Substring(0,3) -like "obs") { $conceptno = "01_" }
+    if ($singlehost.Substring(0,3).Substring(0,3) -like "bfg") { $conceptno = "06_" }
+    if ($singlehost.Substring(0,3).Substring(0,3) -like "flm") { $conceptno = "02_" }
+    if ($singlehost.Substring(0,3).Substring(0,3) -like "cig") { $conceptno = "07_" }
+    if ($singlehost.Substring(0,3).Substring(0,3) -like "doc") { $conceptno = "04_" }
+        
+ if (!(Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain -eq $true) {
+            write-host "$singlehost, INFO, Attempting to join to osirs.local"
+            $bgdirectory = ((Get-ChildItem "c:\ProgramData") -match "bomgar").name
+            if ($bgdirectory -ne $null) {
+                if ($conceptno -eq "01_") { $OU='OU=Computer P1,OU=Outback,OU=Concepts,DC=osirs,DC=local' }
+                if ($conceptno -eq "02_") { $OU='OU=Computer P1,OU=Flemings,OU=Concepts,DC=osirs,DC=local' }
+                if ($conceptno -eq "07_") { $OU='OU=Computer P1,OU=Carrabbas,OU=Concepts,DC=osirs,DC=local' }
+                if ($conceptno -eq "06_") { $OU='OU=Computer P1,OU=Bonefish Grill,OU=Concepts,DC=osirs,DC=local' }
+                if ($conceptno -eq "04_") { $OU='OU=Computer P1,OU=DoorSide,OU=Concepts,DC=osirs,DC=local' }
+
+                #$OU='OU=Computers,OU=P1,OU=PCI,DC=bbilab,DC=local';
+
+                $join = (Get-WmiObject Win32_ComputerSystem).JoinDomainOrWorkgroup("osirs.local",$promptCredslab.GetNetworkCredential().Password,$promptCredslab.UserName,$OU,3) 
+                If ($join.ReturnValue -eq 0) {
+                    Write-Host "$singlehost, INFO,   Successfully joined to osirs.local"
+                    #Restart-Computer
+                    #write-host "$singlehost, INFO,   Rebooting machine"
+                    $win32OS = get-wmiobject win32_operatingsystem 
+                    $win32OS.psbase.Scope.Options.EnablePrivileges = $true
+                   
+                } else { Write-Host "Error while domain joining in $singlehost" }
+            } else { Write-Host "There is no bomgar session. please check $singlehost" }
+        } else { write-host "$singlehost, INFO,  may already be on the domain"
+       }
+ 
+################### Update Group Policy ################################3########################
+   & net user support /active:yes
+   & net accounts /MaxPWAge:unlimited
+   & net user support /expires:never
+   & net accounts /lockoutthreshold:999
+   & net accounts /lockoutduration:2
+   & net accounts /lockoutwindow:1
+   & net user support u0ZggiidQe8gGk%fFW0okwqyvq!RcT!
+   Write-Host "$env:ComputerName Default settings are updated"
+    & gpupdate /force
+    Write-Host "$env:ComputerName group policy updated"
+     Restart-Computer -Force
+    } -ArgumentList $singlehost,$promptCreds,$promptCredslab
+  }
+   else{
+   Write-Host "$singlehost not on the network"
+   }
+    ##################################################################################################
+##################################################################################################
+}
+
+$ErrorActionPreference = "SilentlyContinue";
+Stop-Transcript | Out-Null;
+$ErrorActionPreference = "Continue";
